@@ -10,6 +10,8 @@ This flake should enable you to inject podman as a development environment depen
 
 ### Directly
 
+*WARNING: This direct usage still requires manual configuation of the `/etc/subuid` and `/etc/subgid` just like a regular podman installation, manual installation of `newuidmap`, and manual creation of the `.config/containers/{registries.conf,policy.json}` files.*
+
 To fire off podman in a Nix shell quickly, just use this command to run a `hello-world` container
 from the Docker Hub:
 
@@ -17,10 +19,17 @@ from the Docker Hub:
 nix run github:christianharke/podman-shell-flake -- run hello-world
 ```
 
+Or to create an ad-hoc subshell with podman available:
+```
+nix shell github:christianharke/podman-shell-flake
+```
+
 ### Nix Overlay
 
+*WARNING: This usage requires manual configuation of the `/etc/subuid` and `/etc/subgid` just like a regular podman installation, and manual installation of `newuidmap`.*
+
 For providing the `podman-shell` in a Nix development shell, this flake needs to be added to the
-`inputs` and its `overlay` registered in the `pkgs` overlay. Afterwards it can just be added to the
+`inputs` and its `overlay`(`overlays.default`) registered in the `nixpkgs` overlay. Afterwards it can just be added to the
 `buildInputs` - but don't forget to integrate its `shellHook` as well.
 
 **Example**
@@ -31,29 +40,44 @@ For providing the `podman-shell` in a Nix development shell, this flake needs to
 {
   description = "Podman shell flake demo";
 
+  # include the podman-shell flake
   inputs.podman-shell.url = "github:christianharke/podman-shell-flake";
 
   outputs = { self, nixpkgs, podman-shell }:
     let
-      system = "x86_64-linux";
-      pkgs = import nixpkgs {
+      # System types to support.
+      supportedSystems = [ "aarch64-linux" "x86_64-linux" ];
+
+      # Helper function to generate an attrset '{ x86_64-linux = f "x86_64-linux"; ... }'.
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+
+      # Nixpkgs instantiated for supported system types.
+      nixpkgsFor = forAllSystems (system: import nixpkgs {
         inherit system;
         overlays = [
-          podman-shell.overlay
+          # include the podman-shell overlay
+          podman-shell.overlays.default
         ];
-      };
+      });
     in
     {
-      devShell = pkgs.mkShell {
-        name = "my-dev-shell";
+      devShells = forAllSystems (system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            name = "my-dev-shell";
 
-        buildInputs = with pkgs; [
-          podman-shell
-          podman-shell.dockerCompat # optional - for use as a `docker` drop-in replacement
-        ];
+            buildInputs = [
+              # include the podman-shell package
+              pkgs.podman-shell
+            ];
 
-        inherit (pkgs.podman-shell) shellHook;
-      };
+            # include specialty shellHook from podman-shell
+            inherit (pkgs.podman-shell) shellHook;
+          };
+        });
     };
 }
 ```
