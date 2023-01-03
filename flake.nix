@@ -41,6 +41,10 @@
         ${name} = {
           type = "app";
           program = "${self.packages.${system}.${name}}/bin/podman";
+          
+          shellHook = ''
+            ${self.packages.${system}.${name}.shellHook}
+          '';
         };
         default = self.apps.${system}.${name};
       });
